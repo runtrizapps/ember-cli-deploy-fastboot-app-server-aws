@@ -7,13 +7,12 @@ function _list(opts) {
   let AWS  = require('aws-sdk');
   let RSVP = require('rsvp');
 
-  let accessKeyId     = opts.accessKeyId;
-  let secretAccessKey = opts.secretAccessKey;
-  let archivePrefix   = opts.archivePrefix;
-  let prefix          = opts.prefix;
-  let bucket          = opts.bucket;
-  let region          = opts.region;
-  let manifestKey     = opts.manifestKey
+  let accessKeyId        = opts.accessKeyId;
+  let secretAccessKey    = opts.secretAccessKey;
+  let fastbootS3Prefix   = opts.fastbootS3Prefix;
+  let bucket             = opts.bucket;
+  let region             = opts.region;
+  let fastbootS3Manifest = opts.fastbootS3Manifest
 
   let client = new AWS.S3({
     accessKeyId,
@@ -25,11 +24,10 @@ function _list(opts) {
   let getObject   = RSVP.denodeify(client.getObject.bind(client));
 
   let revisionsResults;
-
-  return listObjects({ Bucket: bucket, Prefix: [prefix, archivePrefix].filter(s=>!!s).join('/') })
+  return listObjects({ Bucket: bucket, Prefix: fastbootS3Prefix })
     .then((results) => {
       revisionsResults = results;
-      return getObject({ Bucket: bucket, Key: manifestKey });
+      return getObject({ Bucket: bucket, Key: fastbootS3Manifest });
     })
     .then((current) => {
       return { revisions: revisionsResults, current };
@@ -53,7 +51,7 @@ function _list(opts) {
         return new Date(b.LastModified) - new Date(a.LastModified);
       })
       .map((d) => {
-        let match = d.Key.match(new RegExp(archivePrefix+'([^.]*)\\.zip'));
+        let match = d.Key.match(new RegExp(fastbootS3Prefix+'([^.]*)\\.zip'));
         if (!match) {
           return; // ignore files that are no zipped app builds
         }
@@ -92,29 +90,43 @@ module.exports = {
           return context.fastbootDownloaderManifestContent;
         },
 
-        manifestKey: 'fastboot-deploy-info.json'
+        manifestKey: 'fastboot-deploy-info.json',
+
+        activateZip: false,
       },
 
       requiredConfig: ['bucket', 'region'],
 
-      activate: function(/* context */) {
+      setup: function() {
+        let archivePrefix        = this.readConfig('archivePrefix');
+        let prefix               = this.readConfig('prefix');
+        let manifestKey          = this.readConfig('manifestKey');
+
+        let fastbootS3Prefix     = [prefix, archivePrefix]
+          .filter(p => !!p)
+          .join('/');
+
+        let fastbootS3Manifest   = [prefix, manifestKey]
+          .filter(p => !!p)
+          .join('/');
+
+        return { fastbootS3Prefix, fastbootS3Manifest };
+      },
+
+      activate: function(context) {
         let revisionKey   = this.readConfig('revisionKey');
         let bucket        = this.readConfig('bucket');
-        let prefix        = this.readConfig('prefix');
-        let archivePrefix = this.readConfig('archivePrefix');
-
-        let archivePath = [prefix, archivePrefix].filter(s=>!!s).join('/')
+        let activateZip   = this.readConfig('activateZip');
+        let promises      = [];
 
         // update manifest-file to point to passed revision
         let downloaderManifestContent = this.readConfig('downloaderManifestContent');
-
-        let manifest        = downloaderManifestContent(bucket, `${archivePath}${revisionKey}.zip`);
+        let manifest        = downloaderManifestContent(bucket, `${context.fastbootS3Prefix}${revisionKey}.zip`);
         let AWS             = require('aws-sdk');
         let RSVP            = require('rsvp');
         let accessKeyId     = this.readConfig('accessKeyId');
         let secretAccessKey = this.readConfig('secretAccessKey');
         let region          = this.readConfig('region');
-        let manifestKey     = this.readConfig('manifestKey');
 
         let client = new AWS.S3({
           accessKeyId,
@@ -123,12 +135,26 @@ module.exports = {
         });
         let putObject = RSVP.denodeify(client.putObject.bind(client));
 
-        return putObject({
+        promises.push(putObject({
           Bucket: bucket,
-          Key: [prefix, manifestKey].filter(s=>!!s).join('/'),
+          Key: context.fastbootS3Manifest,
           Body: manifest,
           ACL: 'public-read'
-        });
+        }));
+
+        if (activateZip) {
+
+          let copyObject = RSVP.denodeify(client.copyObject.bind(client));
+
+          promises.push(copyObject({
+            Bucket: bucket,
+            CopySource: `${bucket}/${context.fastbootS3Prefix}${revisionKey}.zip`,
+            Key: context.fastbootS3Prefix.replace(/-$/, '.zip'),
+            ACL: 'public-read'
+          }));
+        }
+
+        return RSVP.all(promises);
       },
 
       upload: function(context) {
@@ -139,8 +165,8 @@ module.exports = {
         let accessKeyId     = this.readConfig('accessKeyId');
         let secretAccessKey = this.readConfig('secretAccessKey');
         let bucket          = this.readConfig('bucket');
-        var prefix          = this.readConfig('prefix');
         let region          = this.readConfig('region');
+        let revisionKey   = this.readConfig('revisionKey');
 
         let client = new AWS.S3({
           accessKeyId,
@@ -155,37 +181,35 @@ module.exports = {
         return putObject({
           Bucket: bucket,
           Body: data,
-          Key: [prefix, context.fastbootArchiveName].filter(s=>!!s).join('/'),
+          Key: `${context.fastbootS3Prefix}${revisionKey}.zip`,
         });
       },
 
-      fetchRevisions: function() {
+      fetchRevisions: function(context) {
         let accessKeyId     = this.readConfig('accessKeyId');
         let secretAccessKey = this.readConfig('secretAccessKey');
-        let archivePrefix   = this.readConfig('archivePrefix');
         let bucket          = this.readConfig('bucket');
-        let prefix          = this.readConfig('prefix');
         let region          = this.readConfig('region');
-        let manifestKey     = this.readConfig('manifestKey');
+        let fastbootS3Prefix = context.fastbootS3Prefix;
+        let fastbootS3Manifest = context.fastbootS3Manifest;
 
         let opts = {
-          accessKeyId, secretAccessKey, archivePrefix, bucket, prefix, region, manifestKey
+          accessKeyId, secretAccessKey, bucket, region, fastbootS3Manifest, fastbootS3Prefix
         };
 
         return _list(opts);
       },
 
-      fetchInitialRevisions: function() {
+      fetchInitialRevisions: function(context) {
         let accessKeyId     = this.readConfig('accessKeyId');
         let secretAccessKey = this.readConfig('secretAccessKey');
-        let archivePrefix   = this.readConfig('archivePrefix');
         let bucket          = this.readConfig('bucket');
-        let prefix          = this.readConfig('prefix');
         let region          = this.readConfig('region');
-        let manifestKey     = this.readConfig('manifestKey');
+        let fastbootS3Prefix = context.fastbootS3Prefix;
+        let fastbootS3Manifest = context.fastbootS3Manifest;
 
         let opts = {
-          accessKeyId, secretAccessKey, archivePrefix, bucket, prefix, region, manifestKey
+          accessKeyId, secretAccessKey, bucket, region, fastbootS3Manifest, fastbootS3Prefix
         };
 
         return _list(opts)
