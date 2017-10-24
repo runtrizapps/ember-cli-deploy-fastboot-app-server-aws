@@ -93,6 +93,7 @@ module.exports = {
         manifestKey: 'fastboot-deploy-info.json',
 
         activateZip: false,
+        activateManifest: true,
       },
 
       requiredConfig: ['bucket', 'region'],
@@ -117,6 +118,7 @@ module.exports = {
         let revisionKey   = this.readConfig('revisionKey');
         let bucket        = this.readConfig('bucket');
         let activateZip   = this.readConfig('activateZip');
+        let activateManifest = this.readConfig('activateManifest');
         let promises      = [];
 
         // update manifest-file to point to passed revision
@@ -133,17 +135,19 @@ module.exports = {
           secretAccessKey,
           region
         });
-        let putObject = RSVP.denodeify(client.putObject.bind(client));
 
-        promises.push(putObject({
-          Bucket: bucket,
-          Key: context.fastbootS3Manifest,
-          Body: manifest,
-          ACL: 'public-read'
-        }));
+        if (activateManifest) {
+          let putObject = RSVP.denodeify(client.putObject.bind(client));
+
+          promises.push(putObject({
+            Bucket: bucket,
+            Key: context.fastbootS3Manifest,
+            Body: manifest,
+            ACL: 'public-read'
+          }));
+        }
 
         if (activateZip) {
-
           let copyObject = RSVP.denodeify(client.copyObject.bind(client));
 
           promises.push(copyObject({
