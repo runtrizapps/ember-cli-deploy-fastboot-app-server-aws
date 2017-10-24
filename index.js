@@ -10,6 +10,7 @@ function _list(opts) {
   let accessKeyId     = opts.accessKeyId;
   let secretAccessKey = opts.secretAccessKey;
   let archivePrefix   = opts.archivePrefix;
+  let prefix          = opts.prefix;
   let bucket          = opts.bucket;
   let region          = opts.region;
   let manifestKey     = opts.manifestKey
@@ -25,7 +26,7 @@ function _list(opts) {
 
   let revisionsResults;
 
-  return listObjects({ Bucket: bucket, Prefix: archivePrefix })
+  return listObjects({ Bucket: bucket, Prefix: [prefix, archivePrefix].filter(s=>!!s).join('/') })
     .then((results) => {
       revisionsResults = results;
       return getObject({ Bucket: bucket, Key: manifestKey });
@@ -99,11 +100,15 @@ module.exports = {
       activate: function(/* context */) {
         let revisionKey   = this.readConfig('revisionKey');
         let bucket        = this.readConfig('bucket');
+        let prefix        = this.readConfig('prefix');
         let archivePrefix = this.readConfig('archivePrefix');
+
+        let archivePath = [prefix, archivePrefix].filter(s=>!!s).join('/')
+
         // update manifest-file to point to passed revision
         let downloaderManifestContent = this.readConfig('downloaderManifestContent');
 
-        let manifest        = downloaderManifestContent(bucket, `${archivePrefix}${revisionKey}.zip`);
+        let manifest        = downloaderManifestContent(bucket, `${archivePath}${revisionKey}.zip`);
         let AWS             = require('aws-sdk');
         let RSVP            = require('rsvp');
         let accessKeyId     = this.readConfig('accessKeyId');
@@ -120,7 +125,7 @@ module.exports = {
 
         return putObject({
           Bucket: bucket,
-          Key: manifestKey,
+          Key: [prefix, manifestKey].filter(s=>!!s).join('/'),
           Body: manifest,
           ACL: 'public-read'
         });
@@ -134,6 +139,7 @@ module.exports = {
         let accessKeyId     = this.readConfig('accessKeyId');
         let secretAccessKey = this.readConfig('secretAccessKey');
         let bucket          = this.readConfig('bucket');
+        var prefix          = this.readConfig('prefix');
         let region          = this.readConfig('region');
 
         let client = new AWS.S3({
@@ -149,7 +155,7 @@ module.exports = {
         return putObject({
           Bucket: bucket,
           Body: data,
-          Key: context.fastbootArchiveName
+          Key: [prefix, context.fastbootArchiveName].filter(s=>!!s).join('/'),
         });
       },
 
@@ -158,11 +164,12 @@ module.exports = {
         let secretAccessKey = this.readConfig('secretAccessKey');
         let archivePrefix   = this.readConfig('archivePrefix');
         let bucket          = this.readConfig('bucket');
+        let prefix          = this.readConfig('prefix');
         let region          = this.readConfig('region');
         let manifestKey     = this.readConfig('manifestKey');
 
         let opts = {
-          accessKeyId, secretAccessKey, archivePrefix, bucket, region, manifestKey
+          accessKeyId, secretAccessKey, archivePrefix, bucket, prefix, region, manifestKey
         };
 
         return _list(opts);
@@ -173,11 +180,12 @@ module.exports = {
         let secretAccessKey = this.readConfig('secretAccessKey');
         let archivePrefix   = this.readConfig('archivePrefix');
         let bucket          = this.readConfig('bucket');
+        let prefix          = this.readConfig('prefix');
         let region          = this.readConfig('region');
         let manifestKey     = this.readConfig('manifestKey');
 
         let opts = {
-          accessKeyId, secretAccessKey, archivePrefix, bucket, region, manifestKey
+          accessKeyId, secretAccessKey, archivePrefix, bucket, prefix, region, manifestKey
         };
 
         return _list(opts)
