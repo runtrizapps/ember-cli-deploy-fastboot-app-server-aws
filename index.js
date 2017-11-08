@@ -36,7 +36,7 @@ function _list(opts) {
       return { revisions: revisionsResults, current: { Body: '{}'} };
     })
     .then((result) => {
-      if (result.revisions.length < 1) {
+      if (!result.revisions || result.revisions.length < 1) {
         return { revisions: [] };
       }
 
